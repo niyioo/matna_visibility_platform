@@ -1,0 +1,1 @@
+// components/suppliers/SupplierTable.jsx

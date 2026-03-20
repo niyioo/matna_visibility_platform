@@ -1,0 +1,5 @@
+from decimal import Decimal
+
+ZERO_DECIMAL = Decimal("0.00")
+RAW_CASSAVA_CODE = "RAW_CASSAVA"
+FINISHED_STARCH_CODE = "FINISHED_STARCH"
