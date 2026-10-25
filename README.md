@@ -10,8 +10,12 @@ An advanced, full-stack operational intelligence platform designed to track cass
 * **Supplier Management:** Maintain a complete supplier registry, track individual deliveries, and record quality control notes.
 * **Analytics Dashboard:** Real-time visual metrics, yield trends, and inflow vs. output charts powered by Recharts.
 * **Comprehensive Reporting:** Generate and export daily, weekly, or monthly operational summaries in CSV or PDF formats.
+* **Audit-Safe Stock Ledger:** Every stock movement is an append-only ledger entry. Records are voided, never deleted, and a reconciliation check confirms balances match the ledger.
+* **Server-Side KPI Thresholds:** Yield, downtime and stock-cover targets come from configuration, and the dashboard raises prioritised alerts when a KPI leaves its range.
 
 ## 📸 System Preview
+
+A full walkthrough is in [docs/matna-walkthrough.mp4](./docs/matna-walkthrough.mp4).
 
 ### 🖥️ Analytics Dashboard
 The central hub for management to monitor production snapshots, yield efficiency, and downtime KPIs.
@@ -24,6 +28,10 @@ A streamlined interface for floor operators to log daily production metrics with
 ### 📦 Inventory Management
 Track real-time balances of raw materials and finished goods, alongside a complete transaction history.
 ![Inventory Management](./docs/screenshots/inventory.png)
+
+### 📈 Analytics
+30-day yield, inflow-versus-output and downtime trends, with unusual days highlighted.
+![Analytics](./docs/screenshots/analytics.png)
 
 ### 🚚 Supplier Portal
 Manage supplier profiles and track historical delivery volumes.
