@@ -1,21 +1,11 @@
-import api from "./axios";
+import api, { refreshAccessToken } from "./axios";
 
 export const authApi = {
-  login: async (payload) => {
-    const response = await api.post("/auth/login/", payload);
-    return response.data;
-  },
-
-  getMe: async (token = null) => {
-    const config = token
-      ? {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      : undefined;
-
-    const response = await api.get("/auth/me/", config);
-    return response.data;
-  }
+  /** Returns { access }; the refresh token arrives as an httpOnly cookie. */
+  login: (credentials) => api.post("/auth/login/", credentials).then((r) => r.data),
+  /** Exchanges the refresh cookie for an access token (throws when there is no session). */
+  restoreSession: () => refreshAccessToken(),
+  getMe: () => api.get("/auth/me/").then((r) => r.data),
+  /** Revokes the session held in the cookie. Needs no access token. */
+  logout: () => api.post("/auth/logout/", {}),
 };

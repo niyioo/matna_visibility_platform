@@ -63,9 +63,13 @@ pnpm-debug.log*
 dist/
 .build/
 
-# dotenv
+# dotenv (keep the documented templates)
 .env
 .env.*
+!.env.example
+
+# Backups
+backups/
 
 # Misc
 .DS_Store

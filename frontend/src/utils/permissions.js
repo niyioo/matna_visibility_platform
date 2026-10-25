@@ -1,9 +1,15 @@
-export const isAdmin = (user) => user?.role === "ADMIN";
-export const isOperations = (user) => user?.role === "OPERATIONS";
-export const isManagement = (user) => user?.role === "MANAGEMENT";
+export const ROLES = Object.freeze({
+  ADMIN: "ADMIN",
+  OPERATIONS: "OPERATIONS",
+  MANAGEMENT: "MANAGEMENT",
+});
 
-export const canManageData = (user) =>
-  isAdmin(user) || isOperations(user);
+export const DATA_ENTRY_ROLES = [ROLES.ADMIN, ROLES.OPERATIONS];
 
-export const canViewManagement = (user) =>
-  isAdmin(user) || isManagement(user);
+export const isAdmin = (user) => user?.role === ROLES.ADMIN;
+
+/** Can record production entries, suppliers and deliveries. */
+export const canManageData = (user) => DATA_ENTRY_ROLES.includes(user?.role);
+
+/** Can void records and adjust stock (reverses inventory). */
+export const canVoidRecords = isAdmin;

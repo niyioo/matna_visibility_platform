@@ -1,115 +1,132 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
-import { createProductionEntry, fetchProductionEntries } from "./productionThunks";
+import Field from "../../components/common/Field";
+import usePlatformConfig from "../../hooks/usePlatformConfig";
+import { previewYield, toProductionPayload, validateProductionEntry } from "../../utils/validation";
 import { clearProductionMessage } from "./productionSlice";
-import Card from "../../components/common/Card";
-import FormInput from "../../components/common/FormInput";
+import { createProductionEntry, fetchProductionEntries } from "./productionThunks";
+
+const EMPTY_FORM = {
+  production_date: "",
+  cassava_inflow_tons: "",
+  starch_output_tons: "",
+  downtime_minutes: "",
+  notes: "",
+};
 
 export default function ProductionForm() {
   const dispatch = useAppDispatch();
-  const { loading, error, successMessage } = useAppSelector((state) => state.production);
+  const { ready, thresholds, limits, today } = usePlatformConfig();
+  const { submitting, submitError, fieldErrors: serverErrors, successMessage } = useAppSelector((s) => s.production);
 
-  const [form, setForm] = useState({
-    production_date: "",
-    cassava_inflow_tons: "",
-    starch_output_tons: "",
-    downtime_minutes: "",
-    notes: ""
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [touched, setTouched] = useState({});
+  const [submitted, setSubmitted] = useState(false);
 
-  const yieldPreview = useMemo(() => {
-    const inflow = Number(form.cassava_inflow_tons || 0);
-    const output = Number(form.starch_output_tons || 0);
-    if (!inflow) return "0.00";
-    return ((output / inflow) * 100).toFixed(2);
-  }, [form.cassava_inflow_tons, form.starch_output_tons]);
+  const clientErrors = validateProductionEntry(form, { today, maxDowntimeMinutes: limits?.max_downtime_minutes });
+  const showError = (name) => (submitted || touched[name]) && clientErrors[name];
+  const errorFor = (name) => showError(name) || serverErrors[name];
+
+  const yieldValue = previewYield(form.cassava_inflow_tons, form.starch_output_tons);
+  const yieldTarget = thresholds?.yield_target_percent;
+  const yieldCritical = thresholds?.yield_critical_percent;
+  const yieldMaxPlausible = thresholds?.yield_max_plausible_percent;
+  const yieldTone =
+    yieldValue == null || !thresholds ? ""
+    : yieldValue > yieldMaxPlausible ? "implausible"
+    : yieldValue >= yieldTarget ? "good"
+    : yieldValue >= yieldCritical ? "warn"
+    : "bad";
 
   const handleChange = (e) => {
-    dispatch(clearProductionMessage());
-    setForm((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }));
+    const { name, value } = e.target;
+    if (submitError || successMessage) dispatch(clearProductionMessage());
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleBlur = (e) => setTouched((t) => ({ ...t, [e.target.name]: true }));
+
+  const reset = () => {
+    setForm(EMPTY_FORM);
+    setTouched({});
+    setSubmitted(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const resultAction = await dispatch(createProductionEntry(form));
-    if (createProductionEntry.fulfilled.match(resultAction)) {
-      setForm({
-        production_date: "",
-        cassava_inflow_tons: "",
-        starch_output_tons: "",
-        downtime_minutes: "",
-        notes: ""
-      });
+    if (submitting || !ready) return; // guard against double submission
+    setSubmitted(true);
+    if (Object.keys(clientErrors).length) return;
+
+    const result = await dispatch(createProductionEntry(toProductionPayload(form)));
+    if (createProductionEntry.fulfilled.match(result)) {
+      reset();
       dispatch(fetchProductionEntries());
     }
   };
 
+  const input = (name, props) => (
+    <input name={name} value={form[name]} onChange={handleChange} onBlur={handleBlur} disabled={submitting} {...props} />
+  );
+
   return (
-    <Card title="New Production Entry">
-      <form className="grid-form" onSubmit={handleSubmit}>
-        <FormInput
-          label="Production Date"
-          type="date"
-          name="production_date"
-          value={form.production_date}
-          onChange={handleChange}
-          required
-        />
-        <FormInput
-          label="Cassava Inflow (tons)"
-          type="number"
-          step="0.01"
-          name="cassava_inflow_tons"
-          value={form.cassava_inflow_tons}
-          onChange={handleChange}
-          required
-        />
-        <FormInput
-          label="Starch Output (tons)"
-          type="number"
-          step="0.01"
-          name="starch_output_tons"
-          value={form.starch_output_tons}
-          onChange={handleChange}
-          required
-        />
-        <FormInput
-          label="Downtime (minutes)"
-          type="number"
-          name="downtime_minutes"
-          value={form.downtime_minutes}
-          onChange={handleChange}
-          required
-        />
+    <section className="card" aria-labelledby="production-form-title">
+      <div className="card-header"><h3 id="production-form-title">New production entry</h3></div>
+      <div className="card-body">
+        <form className="grid-form" onSubmit={handleSubmit} noValidate>
+          <Field label="Production date" error={errorFor("production_date")}>
+            {input("production_date", { type: "date", max: today, required: true })}
+          </Field>
 
-        <div className="form-group full-width">
-          <label>Yield Preview</label>
-          <div className="preview-box">{yieldPreview}%</div>
-        </div>
+          <Field label="Downtime (minutes)" error={errorFor("downtime_minutes")} hint="Leave blank if none">
+            {input("downtime_minutes", { type: "number", min: 0, max: limits?.max_downtime_minutes, step: 1, inputMode: "numeric", placeholder: "0" })}
+          </Field>
 
-        <div className="form-group full-width">
-          <label>Notes</label>
-          <textarea
-            name="notes"
-            rows="4"
-            value={form.notes}
-            onChange={handleChange}
-            placeholder="Optional operational notes"
-          />
-        </div>
+          <Field label="Cassava inflow (tons)" error={errorFor("cassava_inflow_tons")}>
+            {input("cassava_inflow_tons", { type: "number", min: 0, step: "0.01", inputMode: "decimal", placeholder: "e.g. 120.00", required: true })}
+          </Field>
 
-        {error && <div className="alert error full-width">{error}</div>}
-        {successMessage && <div className="alert success full-width">{successMessage}</div>}
+          <Field label="Starch output (tons)" error={errorFor("starch_output_tons")}>
+            {input("starch_output_tons", { type: "number", min: 0, step: "0.01", inputMode: "decimal", placeholder: "e.g. 34.00", required: true })}
+          </Field>
 
-        <div className="full-width">
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? "Saving..." : "Save Production Entry"}
-          </button>
-        </div>
-      </form>
-    </Card>
+          <div className="form-group full-width">
+            <span className="form-label">Estimated yield</span>
+            <div className={`preview-box ${yieldTone === "implausible" ? "bad" : yieldTone}`} aria-live="polite">
+              {yieldValue == null ? "—" : `${yieldValue.toFixed(2)}%`}
+              {yieldTone === "bad" && <span className="preview-note">Below the {yieldCritical}% critical threshold — check the figures</span>}
+              {yieldTone === "warn" && <span className="preview-note">Below the {yieldTarget}% target</span>}
+              {yieldTone === "implausible" && (
+                <span className="preview-note">Unusually high (above {yieldMaxPlausible}%) — double-check inflow and output</span>
+              )}
+            </div>
+          </div>
+
+          <Field label="Operational notes" error={errorFor("notes")} className="full-width">
+            <textarea
+              name="notes"
+              rows={3}
+              maxLength={2000}
+              value={form.notes}
+              onChange={handleChange}
+              disabled={submitting}
+              placeholder="Optional — stoppages, quality observations, shift remarks."
+            />
+          </Field>
+
+          {submitError && <div className="alert error full-width" role="alert">{submitError}</div>}
+          {successMessage && <div className="alert success full-width" role="status">{successMessage}</div>}
+
+          <div className="full-width actions-row">
+            <button type="submit" className="btn btn-primary" disabled={submitting || !ready}>
+              {submitting ? "Saving…" : "Save production entry"}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => { reset(); dispatch(clearProductionMessage()); }} disabled={submitting}>
+              Clear
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

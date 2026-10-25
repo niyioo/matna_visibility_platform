@@ -1,13 +1,7 @@
 import api from "./axios";
 
 export const inventoryApi = {
-  getBalances: async () => {
-    const response = await api.get("/inventory/balances/");
-    return response.data;
-  },
-
-  getTransactions: async () => {
-    const response = await api.get("/inventory/transactions/");
-    return response.data;
-  }
+  getBalances: () => api.get("/inventory/balances/").then((r) => r.data),
+  getTransactions: (params) => api.get("/inventory/transactions/", { params }).then((r) => r.data),
+  getReconciliation: () => api.get("/inventory/reconciliation/").then((r) => r.data),
 };

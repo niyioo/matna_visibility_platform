@@ -1,57 +1,72 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { loadCurrentUser, loginUser } from "./authThunks";
-import { storage } from "../../utils/storage";
+import { loginUser, logoutUser, restoreSession } from "./authThunks";
 
 const initialState = {
-  user: storage.getUser(),
-  accessToken: storage.getAccessToken(),
-  refreshToken: storage.getRefreshToken(),
+  user: null,
+  // True until the boot-time session restore finishes. The refresh cookie is
+  // httpOnly, so the app cannot know whether a session exists without asking.
+  initializing: true,
+  // True while the login form is submitting.
   loading: false,
-  error: null
+  error: null,
+  sessionExpired: false,
+  // Set when the server could not be reached during restore.
+  offline: false,
+};
+
+const signedOut = (state) => {
+  state.user = null;
+  state.loading = false;
+  state.initializing = false;
 };
 
 const authSlice = createSlice({
   name: "auth",
   initialState,
   reducers: {
-    logout(state) {
-      storage.clearAuth();
-      state.user = null;
-      state.accessToken = null;
-      state.refreshToken = null;
-      state.loading = false;
+    sessionEnded(state, action) {
+      signedOut(state);
+      state.sessionExpired = Boolean(action.payload?.expired);
+    },
+    clearAuthError(state) {
       state.error = null;
-    }
+      state.sessionExpired = false;
+    },
   },
   extraReducers: (builder) => {
     builder
       .addCase(loginUser.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.sessionExpired = false;
+        state.offline = false;
       })
       .addCase(loginUser.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.accessToken = action.payload.tokens.access;
-        state.refreshToken = action.payload.tokens.refresh;
+        state.user = action.payload;
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload || "Login failed.";
+        state.error = action.payload ?? "Sign-in failed.";
       })
-      .addCase(loadCurrentUser.pending, (state) => {
-        state.loading = true;
-      })
-      .addCase(loadCurrentUser.fulfilled, (state, action) => {
-        state.loading = false;
+
+      .addCase(restoreSession.fulfilled, (state, action) => {
+        state.initializing = false;
         state.user = action.payload;
       })
-      .addCase(loadCurrentUser.rejected, (state) => {
-        state.loading = false;
-        state.user = null;
+      .addCase(restoreSession.rejected, (state, action) => {
+        signedOut(state);
+        state.sessionExpired = Boolean(action.payload?.expired);
+        state.offline = Boolean(action.payload?.offline);
+      })
+
+      .addCase(logoutUser.pending, (state) => {
+        signedOut(state);
+        state.error = null;
+        state.sessionExpired = false;
       });
-  }
+  },
 });
 
-export const { logout } = authSlice.actions;
+export const { sessionEnded, clearAuthError } = authSlice.actions;
 export default authSlice.reducer;

@@ -1,1 +1,0 @@
-// components/inventory/InventoryTransactionsTable.jsx

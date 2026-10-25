@@ -1,113 +1,103 @@
-from datetime import date, timedelta, datetime
-
 from django.http import HttpResponse
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.dates import resolve_range, validate_period
 from common.permissions import IsAnyOperationalRole
-from apps.production.models import ProductionEntry
-from .services import get_dashboard_snapshot, get_period_summary
-from .selectors import get_yield_trend, get_inflow_vs_output_trend, get_downtime_trend
+
 from .reports import build_csv_report, build_pdf_report
+from .services import get_dashboard_snapshot, get_period_summary, get_platform_config, get_trends
 
 
-def parse_date(value):
-    if not value:
-        return None
-    return datetime.strptime(value, "%Y-%m-%d").date()
-
-
-class DashboardView(APIView):
+class AnalyticsView(APIView):
     permission_classes = [IsAnyOperationalRole]
 
+
+class PlatformConfigView(AnalyticsView):
+    """Thresholds, analysis windows, input limits and refresh cadence for the UI."""
+
+    def get(self, request):
+        return Response(get_platform_config())
+
+
+class DashboardView(AnalyticsView):
     def get(self, request):
         return Response(get_dashboard_snapshot())
 
 
-class PeriodSummaryView(APIView):
-    permission_classes = [IsAnyOperationalRole]
+class PeriodSummaryView(AnalyticsView):
+    """?period=daily|weekly|monthly or ?start_date=&end_date= — includes the previous equal-length window."""
 
     def get(self, request):
-        period = request.query_params.get("period", "daily")
-        start_date = parse_date(request.query_params.get("start_date"))
-        end_date = parse_date(request.query_params.get("end_date"))
-        return Response(get_period_summary(period, start_date=start_date, end_date=end_date))
+        period = validate_period(request.query_params.get("period", "daily"))
+        start, end = resolve_range(request.query_params, default_period=period)
+        custom = bool(request.query_params.get("start_date") or request.query_params.get("end_date"))
+        return Response(get_period_summary(start, end, period="custom" if custom else period))
 
 
-class YieldTrendView(APIView):
-    permission_classes = [IsAnyOperationalRole]
-
-    def get(self, request):
-        start_date = parse_date(request.query_params.get("start_date"))
-        end_date = parse_date(request.query_params.get("end_date"))
-        return Response(get_yield_trend(start_date=start_date, end_date=end_date))
-
-
-class InflowVsOutputTrendView(APIView):
-    permission_classes = [IsAnyOperationalRole]
+class TrendsView(AnalyticsView):
+    """All daily series in one request, with anomaly flags. Defaults to the last 30 days."""
 
     def get(self, request):
-        start_date = parse_date(request.query_params.get("start_date"))
-        end_date = parse_date(request.query_params.get("end_date"))
-        return Response(get_inflow_vs_output_trend(start_date=start_date, end_date=end_date))
+        start, end = resolve_range(request.query_params)
+        return Response(get_trends(start, end))
 
 
-class DowntimeTrendView(APIView):
-    permission_classes = [IsAnyOperationalRole]
+class _SeriesView(AnalyticsView):
+    """Legacy single-series endpoints, kept for API compatibility."""
 
-    def get(self, request):
-        start_date = parse_date(request.query_params.get("start_date"))
-        end_date = parse_date(request.query_params.get("end_date"))
-        return Response(get_downtime_trend(start_date=start_date, end_date=end_date))
-
-
-class ExportCSVReportView(APIView):
-    permission_classes = [IsAnyOperationalRole]
+    fields: tuple = ()
 
     def get(self, request):
-        period = request.query_params.get("period", "daily")
-        today = date.today()
+        start, end = resolve_range(request.query_params)
+        series = get_trends(start, end)["series"]
+        return Response([{k: row[k] for k in ("production_date", *self.fields)} for row in series])
 
-        if period == "weekly":
-            start_date = today - timedelta(days=6)
-        elif period == "monthly":
-            start_date = today.replace(day=1)
-        else:
-            start_date = today
 
-        queryset = ProductionEntry.objects.filter(
-            production_date__gte=start_date,
-            production_date__lte=today,
-        ).order_by("production_date")
+class YieldTrendView(_SeriesView):
+    fields = ("yield_percent",)
 
-        csv_data = build_csv_report(queryset)
 
-        response = HttpResponse(csv_data, content_type="text/csv")
-        response["Content-Disposition"] = f'attachment; filename="production_{period}_report.csv"'
+class InflowVsOutputTrendView(_SeriesView):
+    fields = ("cassava_inflow_tons", "starch_output_tons")
+
+
+class DowntimeTrendView(_SeriesView):
+    fields = ("downtime_minutes",)
+
+
+class _ExportView(AnalyticsView):
+    content_type = ""
+    extension = ""
+
+    def build(self, start, end, title):
+        raise NotImplementedError
+
+    def get(self, request):
+        period = validate_period(request.query_params.get("period", "daily"))
+        start, end = resolve_range(request.query_params, default_period=period)
+        title = f"Matna Production Report — {start:%d %b %Y} to {end:%d %b %Y}"
+
+        response = HttpResponse(self.build(start, end, title), content_type=self.content_type)
+        # Filename is built only from validated values, never raw query input.
+        response["Content-Disposition"] = (
+            f'attachment; filename="matna_production_{start.isoformat()}_{end.isoformat()}.{self.extension}"'
+        )
+        response["Cache-Control"] = "no-store"
         return response
 
 
-class ExportPDFReportView(APIView):
-    permission_classes = [IsAnyOperationalRole]
+class ExportCSVReportView(_ExportView):
+    content_type = "text/csv; charset=utf-8"
+    extension = "csv"
 
-    def get(self, request):
-        period = request.query_params.get("period", "daily")
-        today = date.today()
+    def build(self, start, end, title):
+        return build_csv_report(start, end)
 
-        if period == "weekly":
-            start_date = today - timedelta(days=6)
-        elif period == "monthly":
-            start_date = today.replace(day=1)
-        else:
-            start_date = today
 
-        queryset = ProductionEntry.objects.filter(
-            production_date__gte=start_date,
-            production_date__lte=today,
-        ).order_by("production_date")
+class ExportPDFReportView(_ExportView):
+    content_type = "application/pdf"
+    extension = "pdf"
 
-        pdf_data = build_pdf_report(queryset, title=f"Production {period.title()} Report")
-
-        response = HttpResponse(pdf_data, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="production_{period}_report.pdf"'
-        return response
+    def build(self, start, end, title):
+        return build_pdf_report(start, end, title=title)

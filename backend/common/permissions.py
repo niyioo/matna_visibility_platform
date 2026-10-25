@@ -1,59 +1,41 @@
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import SAFE_METHODS, BasePermission
+
+ADMIN = "ADMIN"
+OPERATIONS = "OPERATIONS"
+MANAGEMENT = "MANAGEMENT"
+ALL_ROLES = frozenset({ADMIN, OPERATIONS, MANAGEMENT})
 
 
-class IsAdminRole(BasePermission):
+def _has_role(request, roles) -> bool:
+    user = request.user
+    return bool(user and user.is_authenticated and user.is_active and getattr(user, "role", None) in roles)
+
+
+class RolePermission(BasePermission):
+    """Grants access to authenticated, active users whose role is in `roles`."""
+
+    roles: frozenset = frozenset()
+
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.role == "ADMIN")
+        return _has_role(request, self.roles)
 
 
-class IsOperationsRole(BasePermission):
-    def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.role == "OPERATIONS")
+class IsAdminRole(RolePermission):
+    roles = frozenset({ADMIN})
 
 
-class IsManagementRole(BasePermission):
-    def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.role == "MANAGEMENT")
+class IsAdminOrOperations(RolePermission):
+    roles = frozenset({ADMIN, OPERATIONS})
 
 
-class IsAdminOrOperations(BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ["ADMIN", "OPERATIONS"]
-        )
-
-
-class IsAdminOrManagement(BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ["ADMIN", "MANAGEMENT"]
-        )
+class IsAnyOperationalRole(RolePermission):
+    roles = ALL_ROLES
 
 
 class IsAdminOrReadOnly(BasePermission):
+    """Any known role may read; only admins may write."""
+
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
-            return request.user and request.user.is_authenticated
-        return bool(request.user and request.user.is_authenticated and request.user.role == "ADMIN")
-
-
-class IsAdminManagementOrOperations(BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ["ADMIN", "OPERATIONS", "MANAGEMENT"]
-        )
-
-
-class IsAnyOperationalRole(BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ["ADMIN", "OPERATIONS", "MANAGEMENT"]
-        )
+            return _has_role(request, ALL_ROLES)
+        return _has_role(request, {ADMIN})

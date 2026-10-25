@@ -1,49 +1,22 @@
 import api from "./axios";
 
-const buildQuery = (params = {}) => {
-  const searchParams = new URLSearchParams();
-
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
-      searchParams.append(key, value);
-    }
-  });
-
-  const queryString = searchParams.toString();
-  return queryString ? `?${queryString}` : "";
-};
+/** Drop empty values so the backend applies its defaults. */
+const clean = (params = {}) =>
+  Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
 export const analyticsApi = {
-  getDashboard: async () => {
-    const response = await api.get("/analytics/dashboard/");
-    return response.data;
-  },
+  /** Thresholds, windows, limits, periods and refresh cadence. */
+  getConfig: () => api.get("/analytics/config/").then((r) => r.data),
 
-  getSummary: async (period = "daily", params = {}) => {
-    const response = await api.get(
-      `/analytics/summary/${buildQuery({ period, ...params })}`
-    );
-    return response.data;
-  },
+  getDashboard: (config) => api.get("/analytics/dashboard/", config).then((r) => r.data),
 
-  getYieldTrend: async (params = {}) => {
-    const response = await api.get(
-      `/analytics/yield-trend/${buildQuery(params)}`
-    );
-    return response.data;
-  },
+  getSummary: (params, config) =>
+    api.get("/analytics/summary/", { ...config, params: clean(params) }).then((r) => r.data),
 
-  getInflowVsOutput: async (params = {}) => {
-    const response = await api.get(
-      `/analytics/inflow-vs-output/${buildQuery(params)}`
-    );
-    return response.data;
-  },
+  /** All daily series + anomaly flags in one request (defaults to the configured trend window). */
+  getTrends: (params, config) =>
+    api.get("/analytics/trends/", { ...config, params: clean(params) }).then((r) => r.data),
 
-  getDowntimeTrend: async (params = {}) => {
-    const response = await api.get(
-      `/analytics/downtime-trend/${buildQuery(params)}`
-    );
-    return response.data;
-  }
+  downloadReport: (type, params) =>
+    api.get(`/analytics/reports/export/${type}/`, { params: clean(params), responseType: "blob", timeout: 60000 }),
 };
